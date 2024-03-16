@@ -14,7 +14,7 @@ Element: `\name attributes{content}`
 
 Special Sequence:
 
-- \% everything in between two \% is left unchanged.
+- `\%` everything in between two `\%` is left unchanged.
 
 Special Elements:
 
