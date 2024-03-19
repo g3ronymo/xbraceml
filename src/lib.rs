@@ -1,8 +1,7 @@
 use std::error::Error;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::ffi::OsString;
-use std::io::Write;
 use std::process::{Command, Stdio};
 use std::str;
 use log::warn;
@@ -47,23 +46,25 @@ impl Plugin {
             let entry = &commands[i];
             let output = Command::new(entry).arg("elements").output();
             if output.is_err() {
+                warn!(
+                    "Error reading output from: {} -- {}",
+                    entry.to_str().unwrap(),
+                    output.unwrap_err());
                 continue;
             }
-            if output.is_ok() {
-                let output = output.unwrap().stdout;
-                let output: Vec<&str> = str::from_utf8(&output)
-                    .unwrap().trim().split(" ").collect();
-                let mut handles: Vec<String> = Vec::new();
-                for h in output {
-                    handles.push(h.to_string());
-                }
-                if handles.len() > 0 {
-                    let plug = Plugin {
-                        path: entry.to_os_string(), 
-                        handles,
-                    };
-                    result.push(plug);
-                }
+            let output = output.unwrap().stdout;
+            let output: Vec<&str> = str::from_utf8(&output)
+                .unwrap().trim().split(" ").collect();
+            let mut handles: Vec<String> = Vec::new();
+            for h in output {
+                handles.push(h.to_string());
+            }
+            if handles.len() > 0 {
+                let plug = Plugin {
+                    path: entry.to_os_string(), 
+                    handles,
+                };
+                result.push(plug);
             }
         }
         Ok(result)
@@ -129,7 +130,7 @@ struct Element {
     end_idx: usize,
 }
 
-/// returns index of the last byte of the element 
+/// returns index of the last byte of the converted element 
 fn handle_element(
     doc: &mut String, element: &Element, config: &Config) -> usize {
     let mut name = "";
@@ -199,7 +200,7 @@ fn handle_element(
     return element.end_idx + 3 + name_len - 1;
 }
 
-pub fn create_doc_tree(doc: &mut String, config: &Config) 
+pub fn convert(doc: &mut String, config: &Config) 
     -> Result<(), Box<dyn Error>> {
     let mut stack: Vec<Element> = Vec::new();
     let mut i = 0usize;
@@ -209,17 +210,17 @@ pub fn create_doc_tree(doc: &mut String, config: &Config)
         c = doc.as_bytes()[i];
         if c == b'\\' { 
             if i + 1 < doc.as_bytes().len() && doc.as_bytes()[i+1] == b'%' {
-                // remove \%
-                doc.replace_range(i..i+2, "");
-                // find next \%
-                let n = &doc[i..].find("\\%");
-                if n.is_some() {
-                    i = i + n.unwrap();
-                    doc.replace_range(i..i+2, "");
-                } else {
-                    eprintln!("single \\%");
-                }
-                continue;
+               // remove \%
+               doc.replace_range(i..i+2, "");
+               // find next \%
+               let token_idx = &doc[i..].find("\\%");
+               if let Some(n) = token_idx {
+                   i = i + n;
+                   doc.replace_range(i..i+2, "");
+               } else {
+                   warn!("single \\%");
+               }
+              continue;
             } else {
                 stack.push(Element {
                     start_idx: i,
@@ -239,7 +240,7 @@ pub fn create_doc_tree(doc: &mut String, config: &Config)
             };
             if last_elem.start_body_idx != 0 {
                 let line = &doc[i..].lines().next().unwrap();
-                eprintln!("{{ that does not start a body: {}", line);
+                warn!("{{ that does not start a body: {}", line);
             } else {
                 last_elem.start_body_idx = i;
             }
@@ -275,8 +276,7 @@ pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         fs::read_to_string(&config.src)?
     };
 
-    // convert
-    create_doc_tree(&mut doc, config)?;
+    convert(&mut doc, config)?;
 
     // write output
     if config.dst == "-" {
