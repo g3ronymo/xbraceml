@@ -18,8 +18,8 @@ struct Cli {
     /// use long form for empty elements
     #[arg(short)]
     long_empty: bool,
-    /// Path to a plugin file, a directory containing plugins, or a
-    /// executable command. Can be specified multiple times
+    /// Path to a plugin file, or a executable command.
+    /// Can be specified multiple times
     #[arg(short)]
     plugins: Vec<String>,
 }
@@ -28,8 +28,8 @@ impl Cli {
     fn to_config(&self) -> Result<Config, io::Error> {
         let mut plugins: Vec<Plugin> = Vec::new();
         for s in self.plugins.iter() {
-            let mut p = Plugin::init(s)?;
-            plugins.append(&mut p);
+            let p = Plugin::init(s)?;
+            plugins.push(p);
         }
         let config = Config{
             src: self.source.clone(),

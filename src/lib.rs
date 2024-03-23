@@ -15,59 +15,29 @@ pub struct Plugin {
 
 impl Plugin {
     /// Get plugins from path.
-    /// Path can be:
-    /// 1. absolute/relative path to a directory
-    /// 2. absolute/relative path to an executable file
-    /// 3. executable command (found in $PATH)
-    pub fn init(path: &str) -> Result<Vec<Plugin>, io::Error> {
-        let mut result: Vec<Plugin> = Vec::new();
-        let mut commands: Vec<OsString> = Vec::new();
-        let path_absolute = fs::canonicalize(path);
-        if path_absolute.is_ok(){
-            // option 1 or 2 
-            let path_absolute = path_absolute.unwrap();
-            if path_absolute.is_dir() {
-                for entry in fs::read_dir(path_absolute)? {
-                    let entry = entry?;
-                    let p = fs::canonicalize(entry.path())?;
-                    if p.is_file() {
-                        commands.push(p.as_os_str().to_os_string());
-                    }
-                }
-            } else {
-                commands.push(OsString::from(path_absolute));
-            }
-        } else { 
-            // option 3
-            commands.push(OsString::from(path));
-        }
+    /// command can be:
+    /// absolute/relative path to plugin executable or
+    /// executable command (found in $PATH)
+    pub fn init(command: &str) -> Result<Plugin, io::Error> {
+        let command_os_str: OsString = OsString::from(command);
 
-        for i in 0..commands.len() {
-            let entry = &commands[i];
-            let output = Command::new(entry).arg("elements").output();
-            if output.is_err() {
-                warn!(
-                    "Error reading output from: {} -- {}",
-                    entry.to_str().unwrap(),
-                    output.unwrap_err());
-                continue;
-            }
-            let output = output.unwrap().stdout;
-            let output: Vec<&str> = str::from_utf8(&output)
-                .unwrap().trim().split(" ").collect();
-            let mut handles: Vec<String> = Vec::new();
-            for h in output {
-                handles.push(h.to_string());
-            }
-            if handles.len() > 0 {
-                let plug = Plugin {
-                    path: entry.to_os_string(), 
-                    handles,
-                };
-                result.push(plug);
-            }
+        let output = Command::new(&command_os_str).arg("elements").output()?;
+        let output: Vec<&str> = str::from_utf8(&output.stdout)
+            .unwrap().trim().split(" ").collect();
+        let mut handles: Vec<String> = Vec::new();
+        for h in output {
+            handles.push(h.to_string());
         }
-        Ok(result)
+        if handles.len() <= 0 {
+            return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Plugin has not registerd to handle anything.")
+                   );
+        }
+        Ok(Plugin {
+            path: command_os_str, 
+            handles,
+        })
     }
 
     pub fn handles(&self, name: &str) -> bool {
