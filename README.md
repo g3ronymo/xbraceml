@@ -18,10 +18,12 @@ Special Sequence:
 
 Special Elements:
 
-- `\$o{} produces a {`
-- `\$c{} produces a }`
-- `\$s{} produces a \\`
-- `\${} is simply removed, can be used for comments`
+- `\$o{}` produces a `{`
+- `\$c{}` produces a `}`
+- `\$s{}` produces a `\\`
+- `\${}` is simply removed, can be used for comments
+- `\$i{file}` include content from file. If the `process` attribute is 
+  given (`\$i process{}`), process the content of the file before including it.
 
 Special Elements can be disabled with the -d option.
 

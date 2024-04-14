@@ -23,12 +23,12 @@ impl Plugin {
 
         let output = Command::new(&command_os_str).arg("elements").output()?;
         let output: Vec<&str> = str::from_utf8(&output.stdout)
-            .unwrap().trim().split(" ").collect();
+            .unwrap().trim().split(' ').collect();
         let mut handles: Vec<String> = Vec::new();
         for h in output {
             handles.push(h.to_string());
         }
-        if handles.len() <= 0 {
+        if handles.is_empty() {
             return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "Plugin has not registerd to handle anything.")
@@ -94,80 +94,23 @@ pub struct Config {
     pub plugins: Vec<Plugin>,
 }
 
-struct Element {
-    start_idx: usize,
-    start_body_idx: usize,
-    end_idx: usize,
-}
+pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
+    // read input
+    let mut doc = if config.src == "-" {
+        io::read_to_string(io::stdin())?
+    } else {
+        fs::read_to_string(&config.src)?
+    };
 
-/// returns index of the last byte of the converted element 
-fn handle_element(
-    doc: &mut String, element: &Element, config: &Config) -> usize {
-    let mut name = "";
-    let mut attributes = "";
+    convert(&mut doc, config)?;
 
-    if element.start_idx + 1 < element.start_body_idx {
-        let mut name_end = element.start_idx+2;
-        while name_end < element.start_body_idx {
-            if doc.as_bytes()[name_end].is_ascii_whitespace() {
-                break;
-            } 
-            name_end += 1;
-        }
-        name = &doc[element.start_idx+1..name_end];
-        if name_end+1 < element.start_body_idx {
-            attributes = &doc[name_end+1..element.start_body_idx];
-        }
+    // write output
+    if config.dst == "-" {
+        io::stdout().write_all(doc.as_bytes())?;
+    } else {
+        fs::write(&config.dst, doc)?;
     }
-
-
-    if !config.disable_special_elements {
-        if name == "$o" {
-            doc.replace_range(element.start_idx..=element.end_idx, "{");
-            return element.start_idx;
-        } else if name == "$c" {
-            doc.replace_range(element.start_idx..=element.end_idx, "}");
-            return element.start_idx;
-        } else if name == "$s" {
-            doc.replace_range(element.start_idx..=element.end_idx, "\\");
-            return element.start_idx;
-        } else if name == "$" {
-            doc.replace_range(element.start_idx..=element.end_idx, "");
-            return element.start_idx;
-        }
-    }
-
-    let content = if element.start_body_idx + 1 < element.end_idx {
-        &doc[(element.start_body_idx+1)..element.end_idx]
-    } else {""};
-
-    for plugin in &config.plugins {
-        if plugin.handles(name){
-            let result = plugin.execute(name, attributes, content)
-                .expect("Failed to execute plugin");
-            let len = result.len();
-            doc.replace_range(element.start_idx..=element.end_idx, &result);
-            return if len == 0 {element.start_idx} else {
-                element.start_idx + len - 1
-            }
-
-        }
-    }
-
-    if content.is_empty() && !config.long_empty {
-        doc.replace_range(element.start_idx..element.start_idx+1, "<");
-        doc.replace_range(
-            element.start_body_idx..element.start_body_idx+1, "/");
-        doc.replace_range(element.end_idx..element.end_idx+1, ">");
-        return element.end_idx;
-    }
-    let name_len = name.len();
-    let end = format!("</{}>", name);
-    doc.replace_range(element.start_idx..element.start_idx+1, "<");
-    doc.replace_range(
-            element.start_body_idx..element.start_body_idx+1, ">");
-    doc.replace_range(element.end_idx..element.end_idx+1, &end);
-    return element.end_idx + 3 + name_len - 1;
+    Ok(())
 }
 
 pub fn convert(doc: &mut String, config: &Config) 
@@ -231,6 +174,7 @@ pub fn convert(doc: &mut String, config: &Config)
                 last_elem.end_idx = i;
                 i = handle_element(doc, last_elem, config);
                 stack.pop();
+                continue;
             }
         }
         i += 1;
@@ -238,21 +182,103 @@ pub fn convert(doc: &mut String, config: &Config)
     Ok(())
 }
 
-pub fn run(config: &Config) -> Result<(), Box<dyn Error>> {
-    // read input
-    let mut doc = if config.src == "-" {
-        io::read_to_string(io::stdin())?
-    } else {
-        fs::read_to_string(&config.src)?
-    };
-
-    convert(&mut doc, config)?;
-
-    // write output
-    if config.dst == "-" {
-        io::stdout().write_all(doc.as_bytes())?;
-    } else {
-        fs::write(&config.dst, doc)?;
-    }
-    Ok(())
+struct Element {
+    start_idx: usize,
+    start_body_idx: usize,
+    end_idx: usize,
 }
+
+/// returns index of the first unprocessed byte 
+fn handle_element(
+    doc: &mut String, element: &Element, config: &Config) -> usize {
+    let name;
+    let attributes;
+    let content;
+
+    let mut name_end = element.start_idx+1;
+    while name_end < element.start_body_idx {
+        if doc.as_bytes()[name_end].is_ascii_whitespace() {
+            break;
+        } 
+        name_end += 1;
+    }
+
+    name = &doc[element.start_idx+1..name_end];
+    attributes = if name_end == element.start_body_idx {
+        &doc[name_end..element.start_body_idx]
+    } else {
+        &doc[name_end+1..element.start_body_idx]
+    };
+    content = &doc[(element.start_body_idx+1)..element.end_idx];
+
+
+    if !config.disable_special_elements {
+        if name == "$o" {
+            doc.replace_range(element.start_idx..=element.end_idx, "{");
+            return element.start_idx + 1;
+        } else if name == "$c" {
+            doc.replace_range(element.start_idx..=element.end_idx, "}");
+            return element.start_idx + 1;
+        } else if name == "$s" {
+            doc.replace_range(element.start_idx..=element.end_idx, "\\");
+            return element.start_idx + 1;
+        } else if name == "$" {
+            doc.replace_range(element.start_idx..=element.end_idx, "");
+            return element.start_idx;
+        } else if name == "$i" {
+            let mut process = false;
+            for attr in attributes.split_ascii_whitespace() {
+                if attr == "process" {
+                    process = true;
+                    break;
+                }
+            }
+            let mut include_content = fs::read_to_string(content)
+                .unwrap_or_else(|err| {
+                    eprintln!("Include error: {err}");
+                    String::from("")
+                }
+            );
+            if process {
+                let err_msg = format!(
+                    "Can not convert included file {content}");
+                convert(&mut include_content, config).expect(&err_msg);
+            }
+            let len = include_content.len();
+            doc.replace_range(
+                element.start_idx..=element.end_idx, 
+                include_content.as_str()
+            );
+            return element.start_idx + len;
+        }
+    }
+
+
+    for plugin in &config.plugins {
+        if plugin.handles(name){
+            let result = plugin.execute(name, attributes, content)
+                .expect("Failed to execute plugin");
+            let len = result.len();
+            doc.replace_range(element.start_idx..=element.end_idx, &result);
+            return  element.start_idx + len;
+        }
+    }
+
+    if content.is_empty() && !config.long_empty {
+        doc.replace_range(element.start_idx..element.start_idx+1, "<");
+        doc.replace_range(
+            element.start_body_idx..element.start_body_idx+1, "/");
+        doc.replace_range(element.end_idx..element.end_idx+1, ">");
+        return element.end_idx + 1;
+    }
+
+    let name_len = name.len();
+    let end = format!("</{}>", name);
+    doc.replace_range(element.start_idx..element.start_idx+1, "<");
+    doc.replace_range(
+            element.start_body_idx..element.start_body_idx+1, ">");
+    doc.replace_range(element.end_idx..element.end_idx+1, &end);
+    return element.end_idx + 3 + name_len;
+}
+
+
